@@ -21,13 +21,25 @@ static const char comma[] = ",";
 *****************************************************/
 static void bc95_send_cmd(const char *cmd)
 {
-	char bc95_send_buff[64] = {0};
-	u8 bc95_send_num;
-	bc95_send_num = strlen((char *)cmd);
-	memcpy(bc95_send_buff,cmd,bc95_send_num);
-	XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 send>>",bc95_send_buff,bc95_send_num);
-	bc95_Send_Data(bc95_send_buff,bc95_send_num);
-	bc95_Send_Data("\r\n",strlen("\r\n"));
+	static char bc95_send_buff[256] = {0};
+	u8 bc95_send_num = 0;
+	u8 i;
+	if(cmd != NULL && (strlen((char*)cmd)) < 256)
+	{
+		bc95_send_num = strlen((char *)cmd);
+		memcpy(bc95_send_buff,cmd,bc95_send_num);
+		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 send>>",bc95_send_buff,bc95_send_num);
+		bc95_Send_Data(bc95_send_buff,bc95_send_num);
+		bc95_Send_Data("\r\n",strlen("\r\n"));
+		for(i=0;i<bc95_send_num;i++)
+		{
+			bc95_send_buff[i] = 0;
+		}
+	}
+	else
+	{
+		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 error>>","cmd input error",strlen("cmd input error"));
+	}
 }
 
 /*****************************************************
@@ -74,16 +86,27 @@ u8 bc95_setID(u8* id_num)
 
 
 /*****************************************************
+函数原型： 		void bc95_request_sofware(void)
+功能：			Request Manufacturer Revision
+输入：			无
+返回：			无
+*****************************************************/
+void bc95_request_sofware(void)
+{
+	bc95_send_cmd("AT+CGSN=1");
+}
+
+
+/*****************************************************
 函数原型： 		void bc95_request_IMEI(void)
 功能：			Request Product Seril Number
 输入：			无
 返回：			无
 *****************************************************/
-void bc95_request_IMEI(void)
+void bc95_request_(void)
 {
-	bc95_send_cmd("AT+CGSN=1");
+	bc95_send_cmd("AT+CGMR");
 }
-
 
 /*****************************************************
 函数原型： 		void bc95_restar(void)
@@ -271,7 +294,7 @@ void bc95_query_IMSI(void)
 *****************************************************/
 void bc95_Configuration_PDP(void)
 {
-	bc95_send_cmd("AT+CGDCONT=1,\"IP\",\"HUAWEI.COM\"");
+	bc95_send_cmd("AT+CGDCONT=1,\"IP\",\"ctnet\"");
 } 
 
 /*****************************************************
@@ -285,6 +308,39 @@ void bc95_request_bands(void)
 	bc95_send_cmd("AT+NBAND?");
 }
 
+
+/*****************************************************
+函数原型： 		void bc95_set_network_reg_status(void)
+功能：			Set EPS Network Registration Status
+输入：			无
+返回：			无
+*****************************************************/
+void bc95_set_network_reg_status(void)
+{
+	bc95_send_cmd("AT+CEREG=1");
+}
+
+/*****************************************************
+函数原型： 		void bc95_set_connetion_status(void)
+功能：			Set Signalling Connection Status
+输入：			无
+返回：			无
+*****************************************************/
+void bc95_set_connetion_status(void)
+{
+	bc95_send_cmd("AT+CSCON=1");
+}
+
+/*****************************************************
+函数原型： 		void bc95_select_PLMN(void)
+功能：			PLMN Selection
+输入：			无
+返回：			无
+*****************************************************/
+void bc95_select_PLMN(void)
+{
+	bc95_send_cmd("AT+COPS=1,2,\"46011\"");
+}
 
 
 /*****************************************************
@@ -349,27 +405,36 @@ void bc95_request_connetion_status(void)
 *****************************************************/
 void bc95_creat_UDP_socket(char* port)
 {
-	char send_cmd_buffer[30];
+	char send_cmd_buffer[30] = {0};
 	const char set_UDP_socket[] = "AT+NSOCR=DGRAM,17,";
 	memcpy(send_cmd_buffer,set_UDP_socket,strlen(set_UDP_socket));
 	strcat(send_cmd_buffer,port);
-	//strcat(send_cmd_buffer,double_quote);
+	strcat(send_cmd_buffer,comma);
+	strcat(send_cmd_buffer,"1");
 	bc95_send_cmd(send_cmd_buffer);
 }
 
 char* u32_to_hex(const u32 num)
 {
 	static char source_num[10] = {0};
+	char change_buff[10] = {0};
 	u32 change_num = num;
 	u8 i = 0;
+	u8 j = 0;
 	while(change_num != 0)
 	{
-		source_num[i++]=change_num%10 + '0';
+		change_buff[i++]=change_num%10 + '0';
 		change_num/=10;
 	}
-	source_num[i] = '\n';
+	for(j = 0;j < i;j++)
+	{
+		source_num[j] = change_buff[(i-1) - j];
+	}
+	//source_num[i] = '\n';
 	return source_num;
 }
+
+
 /*****************************************************
 函数原型： 		void bc95_UDP_send_messages()
 功能：			UDP Send messages
@@ -379,24 +444,25 @@ char* u32_to_hex(const u32 num)
 #define UDP_SEND_MAX 512
 u8 bc95_UDP_send_messages(char socket,char* ip_addr,char* port,u32 len,u8* data)
 {
-	char send_cmd_buffer[530];
+	char send_cmd_buffer[530] = {0};
 	const char udp_send_messages[] = "AT+NSOST=";
-	if(len >= UDP_SEND_MAX)
+	if((len >= UDP_SEND_MAX) ||(data == NULL) || (len == 0) || (len == NULL))
 	{
 		return DATA_ERROR;
 	}
+	socket = socket + '0';
 	memcpy(send_cmd_buffer,udp_send_messages,strlen(udp_send_messages));
 	strcat(send_cmd_buffer,&socket);
 	strcat(send_cmd_buffer,comma);
-	strcat(send_cmd_buffer,double_quote);
 	strcat(send_cmd_buffer,ip_addr);
-	strcat(send_cmd_buffer,double_quote);
 	strcat(send_cmd_buffer,comma);
 	strcat(send_cmd_buffer,port);
 	strcat(send_cmd_buffer,comma);
 	strcat(send_cmd_buffer,u32_to_hex(len));
 	strcat(send_cmd_buffer,comma);
 	strcat(send_cmd_buffer,(char*)data);
+	bc95_send_cmd(send_cmd_buffer);
+	//bc95_send_cmd("AT+NSOST=0,119.29.155.148,4568,4,22061740");
 	return SUCCEED;
 }
 
@@ -404,6 +470,7 @@ void bc95_close_socket(void)
 {
 	bc95_send_cmd("AT+NSOCL=0");
 }
+
 
 
 #endif

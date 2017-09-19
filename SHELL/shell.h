@@ -20,6 +20,9 @@ extern u8 band5_flag;
 extern u8 band8_flag;
 extern u8 band20_flag;
 extern u8 singal_flag;
+extern u8 nb_state_flag;
+extern u8 test_send_flag;
+extern u8 udp_close_flag;
 #endif
 
 

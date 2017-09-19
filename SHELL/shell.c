@@ -19,6 +19,9 @@ static u8 shell_level = 2; //打印等级，默认为2
 const static char LEVEL_CHANGE_LEVEL_CMD[] = "s gdb ";    //调整调试等级命令
 const static char MAIN_REBOOT_CMD[] = "s reboot";    //系统重启命令
 const static char SINGLE_ECHO[] = "s singal";			//显示信号强度
+const static char NB_CONNECT_STATE[] = "s nb state";      //查询NB-IoT连接状态
+//const static char TEST_SEND[] = "s send";				//发送测试
+//const static char CLOSE_UDP[] = "s close udp";			//关闭UDP
 #ifdef USE_BC95
 const static char SET_BAND5_CMD[] = "s band5";		//设置band为5，频段为850MHz(电信)
 const static char SET_BAND8_CMD[] = "s band8";		//设置band为8，频段为900MHz(移动联通)
@@ -52,6 +55,9 @@ u8 band5_flag = FALSE;
 u8 band8_flag = FALSE;
 u8 band20_flag = FALSE;
 u8 singal_flag = FALSE;
+u8 nb_state_flag = FALSE;
+//u8 test_send_flag = FALSE;
+//u8 udp_close_flag = FALSE;
 void shell_handle(void)
 {
 	//u8 i;
@@ -139,6 +145,18 @@ void shell_handle(void)
 		{
 			band20_flag = TRUE;
 		}
+		else if(memcmp(USART_RX_BUF,NB_CONNECT_STATE,strlen(NB_CONNECT_STATE)) == EQUAL)
+		{
+			nb_state_flag = TRUE;
+		}
+//		else if(memcmp(USART_RX_BUF,TEST_SEND,strlen(TEST_SEND)) == EQUAL)
+//		{
+//			test_send_flag = TRUE;
+//		}
+//		else if(memcmp(USART_RX_BUF,CLOSE_UDP,strlen(CLOSE_UDP)) == EQUAL)
+//		{
+//			udp_close_flag = TRUE;
+//		}
 #endif
 	}
 }
@@ -164,15 +182,15 @@ void level_printf_char(u8 level,char *printf_head,void *printf_data,u32 printf_n
 			printf("%c",printf_head[i]); 
 		}
 		printf("	");
-		for(i = 0;i < printf_num;i++)
+		//printf("\r\n");
+		if(printf_num <= strlen((char*)printf_data))
 		{
-			if(i%16 == 0)
+			for(i = 0;i < printf_num;i++)
 			{
-				printf("\n");
+				printf("%c",((char *)printf_data)[i]);
 			}
-			printf("%c",((char *)printf_data)[i]);
+			printf("\r\n");
 		}
-		printf("\r\n");
 	}
 }
 
@@ -256,7 +274,10 @@ void XPRINT(void (*call_back_print)(u8 level,char *printf_head,void *printf_data
 	u8 level,char *printf_head,void *printf_data,u32 printf_num)
 {
 	#ifdef shell_enable
-	call_back_print(level,printf_head,printf_data,printf_num);
+	if((printf_num <= strlen((char*)printf_data)) && (printf_head != NULL) &&( printf_data != NULL) && (printf_num > 0))
+	{
+		call_back_print(level,printf_head,printf_data,printf_num);
+	}
 	#endif
 }
 

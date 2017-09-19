@@ -24,6 +24,7 @@ void bc95_close_UE_behaviour(void);
 void bc95_request_IMEI(void);
 void bc95_get_singal(void);
 void bc95_query_UE_statistics(void);
+void bc95_request_sofware(void);
 
 u8* bc95_rec_check(const char *pcTarget, const char* pcFindStr);
 
@@ -33,6 +34,9 @@ void bc95_set_phone_fun(void);
 void bc95_query_IMSI(void);
 void bc95_Configuration_PDP(void);
 void bc95_request_bands(void);
+void bc95_set_network_reg_status(void);
+void bc95_set_connetion_status(void);
+void bc95_select_PLMN(void);
 void bc95_activate_network(void);
 void bc95_request_activate_network(void);
 void bc95_request_network_reg_status(void);

@@ -16,6 +16,7 @@
 #endif
 
 //与服务器通信协议中的特殊字符
+#ifdef USE_SIM800A
 #define GPRS_HEAD						0x7e
 #define	GPRS_SYN_CMD					0x0e
 #define GPRS_TAIL						0x7f
@@ -34,6 +35,20 @@
 #define GPRS_CMD_ELECTRICAL_CONTROL 	0x0a
 #define GPRS_CMD_ELECTRICAL_CONTROL_ACK 0x0b
 #define GPRS_CMD_ELECTRICAL_STATE		0x0c
+#endif
+
+#ifdef USE_BC95
+#define GPRS_HEAD						0x7e
+#define	GPRS_SYN_CMD					0x1e
+#define GPRS_TAIL						0x7f
+
+#define GPRS_CMD_HEART					0x01
+#define GPRS_CMD_HEART_ACK				0x99
+#define GPRS_CMD_ALARM					0x02
+#define GPRS_CMD_ALARM_ACK				0x03
+#define GPRS_CMD_DATA					0x04
+#define GPRS_CMD_DATA_ACK				0x05
+#endif
 
 
 //extern u8* usart2_rx_buffer_get(u8* len);
