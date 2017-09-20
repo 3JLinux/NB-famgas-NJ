@@ -37,6 +37,7 @@ void uart2_init(u32 bound);
 void uart3_init(u32 bound);
 #define USART_RX_NO_OK 0
 u8 USART_RX_DATA(void);
+void USART1_send(char *data,u8 num);
 void USART2_send(char *data,u8 num);
 u8* usart2_rx_buffer_get(u32* len);
 void usart2_rx_buffer_clean(void);
