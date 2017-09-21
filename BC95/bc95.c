@@ -471,7 +471,28 @@ void bc95_close_socket(void)
 	bc95_send_cmd("AT+NSOCL=0");
 }
 
-
+/*****************************************************
+函数原型： 		void bc95_UDP_receive_commend(u32 len)
+功能：			Receive Commend (UDP only)
+输入：			无
+返回：			无
+*****************************************************/
+u8 bc95_UDP_receive_commend(u32 len)
+{
+	const char udp_rec_messages[] = "AT+NSORF=0,";
+	char send_cmd_buffer[20] = {0};
+	if(len > 0 && len < 256)
+	{
+		memcpy(send_cmd_buffer,udp_rec_messages,strlen(udp_rec_messages));
+		strcat(send_cmd_buffer,u32_to_hex(len));
+		bc95_send_cmd(send_cmd_buffer);
+	}
+	else
+	{
+		return DATA_ERROR;
+	}
+	return SUCCEED;
+}
 
 #endif
 

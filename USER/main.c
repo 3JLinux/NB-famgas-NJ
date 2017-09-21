@@ -70,6 +70,7 @@ const char bc95_connetion_succeed[] = "NB-IoT CONNERTION SUCCEED";
 const char bc95_UDP_send_err[] = "NB-IoT UDP SEND ERROR";
 
 static u8 bc95_send_ok = TRUE;
+static u8 rec_len = 0;
 #endif
 
 static void QR_printf(void);
@@ -205,7 +206,7 @@ static u8 mac[4] = {0x01,0x02,0x03,0x04};
 	QR_printf();
 	delay_ms(2000);
 	uart_init(921600);
-	IWDG_Init(4,625*10);
+//	IWDG_Init(4,625*10);
 	OSInit();   
  	OSTaskCreate(start_task,(void *)0,(OS_STK *)&START_TASK_STK[START_STK_SIZE-1],START_TASK_PRIO );//创建起始任务
 	OSStart();	
@@ -238,9 +239,9 @@ void start_task(void *pdata)
 	OSTaskCreate(sim800a_task,(void *)0,(OS_STK*)&SIM800A_TASK_STK[SIM800A_STK_SIZE-1],SIM800A_TASK_PRIO);
 #endif
 	heartbeat_tmr = OSTmrCreate((3*60*100),(3*60*100),OS_TMR_OPT_PERIODIC,(OS_TMR_CALLBACK)heartbeat_tmr_callback,0,(INT8U*)"heartbeat_tmr",&err);
-	feeddog_tmr = OSTmrCreate((100),(100),OS_TMR_OPT_PERIODIC,(OS_TMR_CALLBACK)feeddog_tmr_callback,0,(INT8U*)"feeddog_tmr",&err);
+	//feeddog_tmr = OSTmrCreate((100),(100),OS_TMR_OPT_PERIODIC,(OS_TMR_CALLBACK)feeddog_tmr_callback,0,(INT8U*)"feeddog_tmr",&err);
 	OSTmrStart(heartbeat_tmr,&err);
-	OSTmrStart(feeddog_tmr,&err);
+	//OSTmrStart(feeddog_tmr,&err);
 	OSTaskSuspend(START_TASK_PRIO);	//挂起起始任务.
 	OS_EXIT_CRITICAL();				//退出临界区(可以被中断打断)
 }
@@ -275,12 +276,17 @@ void fram_gas_task(void *pdata)
 	u8 nFrameL = 0;
 	static u8 fram_gas_alarm_packet[14] = {0};
 	static u8 fram_gas_alarm_packet_buffer[28] = {0};
+	u8 i;
 	while(1)
 	{
 		if(connetion_state != NET_CONNRTION_ERR && FRAM_GAS_ALARM)
 		{
 			if(bc95_send_ok)
 			{
+				for(i=0;i<28;i++)
+				{
+					fram_gas_alarm_packet_buffer[i] = 0;
+				}
 				nFrameL = gprs_send_data_packet(fram_gas_alarm_packet,GPRS_CMD_ALARM,seq,mac,NULL,0);
 				osqGetOut0x00(fram_gas_alarm_packet_buffer,fram_gas_alarm_packet,nFrameL);
 				OSQPost(q_bc95_send_msg,(void *)fram_gas_alarm_packet_buffer);
@@ -311,10 +317,15 @@ void heartbeat_tmr_callback(void)
 	static u8 heartbeat_packet_send[30] = {0};
 	u8 nFrameL = 0;
 	//u32 len = 0;
+	u8 i;
 	if(connetion_state != NET_CONNRTION_ERR)
 	{
 		if(bc95_send_ok)
 		{
+			for(i=0;i<30;i++)
+			{
+				heartbeat_packet_send[i] = 0;
+			}
 			nFrameL = gprs_send_data_packet(heartbeat_packet,GPRS_CMD_HEART,seq,mac,NULL,0); //数据按协议打包
 			osqGetOut0x00(heartbeat_packet_send,heartbeat_packet,nFrameL);					//将0转化0xef 0xe0，使消息队列能正常发送
 			OSQPost(q_bc95_send_msg,(void *)heartbeat_packet_send);
@@ -331,7 +342,7 @@ void shell_task(void *pdata)
 	u8 nFrameL = 0;
 	//u8 test[50] = {0};
 	static u8 test_change[80] = {0};
-	//u8 i;
+	u8 i;
 	//const static u8 hostMac[4] = {0x22,0x06,0x17,0x40};
 	//const static u8 testData[4] = {0};
 	//const static u8 testData[42] = {0x0A,0x00,0x01,0x02,0x03,0x04,0x16,0x2F,0xA5,0xD4,0x17,0x8A,0x10,0x02,0x76,0x30,0x00,0x7C,0x76,0x81,0x04,\
@@ -401,6 +412,10 @@ void shell_task(void *pdata)
 			//OSQPost(q_bc95_send_msg,"bc95 send test");
 			if(bc95_send_ok)
 			{
+				for(i=0;i<80;i++)
+				{
+					test_change[i] = 0;
+				}
 				nFrameL = gprs_send_data_packet(heartbeat_packet,GPRS_CMD_HEART,seq,mac,NULL,0);
 				osqGetOut0x00(test_change,heartbeat_packet,nFrameL);
 				OSQPost(q_bc95_send_msg,(void *)test_change);
@@ -435,15 +450,18 @@ void shell_task(void *pdata)
 
 
 #ifdef USE_BC95
+#define AT_ONE_DIRECTIVE_DELAY_TIME		500			//发送后等待接收完成
+#define QUERY_NETWORK_TIME				30			//等待30秒连网时间
+#define SECOND_DELAY					1000
 //bc95任务
 void bc95_task(void *pdata)
 {
 	static u8 first_star = TRUE;
 	u8 err;
 	u8 *p = NULL;
-	u8 p_buffer[200] = {0};
-	u8 test_buffer[80] = {0};
-//	u8 i;
+	static u8 p_buffer[200] = {0};
+	static u8 test_buffer[80] = {0};
+	u8 i;
 //	u8* presp = NULL;
 	u32 len = 0;
 //	u8 restaar_count = 0;
@@ -479,17 +497,50 @@ void bc95_task(void *pdata)
 			bc95_send_ok = FALSE;
 			len = osqGetOut0xef(test_buffer,p,strlen((char*)p));
 			hex2char(test_buffer,p_buffer,len);
-			if(bc95_UDP_send((char*)UDP_ipv4_addr,(char*)UDP_local_port,len,p_buffer) == UDP_SEND_SUCCEED)
+			for(i=0;i<strlen((char*)test_buffer);i++)
 			{
-				connetion_state = UDP_SEND_SUCCEED;
-				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 connetion:","UDP_SEND_SUCCEED",strlen("UDP_SEND_SUCCEED"));
+				test_buffer[i] = 0;
 			}
-			else
+			for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
 			{
-				connetion_state = NET_CONNRTION_ERR;
-				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 connetion:","NET_CONNRTION_ERR",strlen("NET_CONNRTION_ERR"));
+				if(bc95_UDP_send((char*)UDP_ipv4_addr,(char*)UDP_local_port,len,p_buffer) == UDP_SEND_SUCCEED)
+				{
+					connetion_state = UDP_SEND_SUCCEED;
+					XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 connetion:","UDP_SEND_SUCCEED",strlen("UDP_SEND_SUCCEED"));
+					XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 UDP send",p_buffer,strlen((char*)p_buffer));
+					for(i=0;i<strlen((char*)p_buffer);i++)
+					{
+						p_buffer[i] = 0;
+					}
+					if(rec_len > 0)
+					{
+						bc95_UDP_receive_commend(rec_len);
+						delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
+						XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+//						if()
+//						{
+//							bc95_rx_buffer_clean();
+//							break;
+//						}
+//						else
+//						{
+//							bc95_rx_buffer_clean();
+//						}
+						bc95_rx_buffer_clean();
+						break;
+					}
+					else
+					{
+						break;
+					}
+				}
+				else
+				{
+					connetion_state = NET_CONNRTION_ERR;
+					XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 connetion:","NET_CONNRTION_ERR",strlen("NET_CONNRTION_ERR"));
+					break;
+				}
 			}
-			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 UDP send",p_buffer,strlen((char*)p_buffer));
 			bc95_send_ok = TRUE;
 			delay_ms(500);
 //			bc95_close_socket();
@@ -503,9 +554,7 @@ void bc95_task(void *pdata)
 
 
 //入网AT指令发送
-#define AT_ONE_DIRECTIVE_DELAY_TIME		2000			//发送后等待接收完成
-#define QUERY_NETWORK_TIME				30			//等待30秒连网时间
-#define SECOND_DELAY					1000
+
 void bc95_band_set(u8 band)
 {
 	u32 len;
@@ -819,7 +868,7 @@ u8 bc95_creat_network_connetion(void)
 		//AT+CGATT? 
 		for(i = 0;i < QUERY_NETWORK_TIME;i++)	//延时30秒
 		{
-			delay_ms(SECOND_DELAY);
+			delay_ms(SECOND_DELAY*2);
 		}
 		bc95_request_activate_network();
 		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
@@ -840,7 +889,7 @@ u8 bc95_creat_network_connetion(void)
 	{
 		//AT+CEREG?
 		bc95_request_network_reg_status();
-		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME * 10);
+		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME );
 		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"OK");
 		key_word = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),",1"); //+CEREG:0,1
 		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
@@ -858,7 +907,7 @@ u8 bc95_creat_network_connetion(void)
 	{
 		//AT+CSCON?
 		bc95_request_connetion_status();
-		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME * 10);
+		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME );
 		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"OK");
 		//key_word = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"1"); //+CSCON:0,1
 		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
@@ -1038,6 +1087,8 @@ u8 bc95_UDP_send(char* ip_addr,char* port,u32 length,u8* data)
 	u32 len;
 	u8* presp = NULL;
 	u8 i;
+	char* bc95_rec_buffer = NULL;
+	u8 rec_len_buffer;
 	u8 socket = 0;
 	if(connetion_state != UDP_SEND_SUCCEED)
 	{
@@ -1070,10 +1121,34 @@ u8 bc95_UDP_send(char* ip_addr,char* port,u32 length,u8* data)
 	}
 	for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
 	{
+		seq++;
 		bc95_UDP_send_messages(socket,ip_addr,port,length,data);
-		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
+		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME*10);
 		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"ERROR");
 		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+		bc95_rec_buffer = strstr((char*)(bc95_rx_buffer_get(&len)),":0,");
+		if(bc95_rec_buffer != NULL)
+		{
+			rec_len_buffer = strlen(bc95_rec_buffer);
+			rec_len_buffer -= strlen(":0,")+2;
+			switch(rec_len_buffer)
+			{
+				case 1: rec_len = bc95_rec_buffer[3] - '0';break;
+				case 2: rec_len = (bc95_rec_buffer[3] - '0') * 10 + bc95_rec_buffer[4] - '0';break;
+				case 3: rec_len = (bc95_rec_buffer[3] - '0') * 100 + (bc95_rec_buffer[4] - '0') *10 + bc95_rec_buffer[5] - '0';break;
+				default: break;
+			}
+			//XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rec_buffer,rec_len_buffer);
+			XPRINT(level_printf_int,BC95_PRINTF_LEVEL,"bc95 receive<<",&rec_len,1);
+			for(i = 0;i < 10;i++)
+			{
+				bc95_rec_buffer[i] = 0;
+			}
+		}
+		else 
+		{
+			rec_len = 0;
+		}
 		bc95_rx_buffer_clean();
 		if(presp == NULL)
 		{
@@ -1312,10 +1387,10 @@ void QR_printf(void)
 	USART1_send("SET TEAR ON\r\n",strlen("SET TEAR ON\r\n"));
 	USART1_send("SIZE 40MM,30MM\n",strlen("SIZE 40MM,30MM\n"));
 	USART1_send("CLS\r\n",strlen("CLS\r\n"));
-	USART1_send("QRCODE 70,20,L,8,M,0,M1,S2,",strlen("QRCODE 70,20,L,8,M,0,M1,S2,"));
+	USART1_send("QRCODE 75,15,L,5,M,2,M1,S2,",strlen("QRCODE 75,15,L,5,M,2,M1,S2,"));
 	hex2char(mac,mac_char,MAC_LEN);
 	USART1_send((char*)mac_char,MAC_LEN);
-	USART1_send("TEXT 60,200,\"TSS24.BF2\",0,2,1,",strlen("TEXT 60,200,\"TSS24.BF2\",0,2,1,"));
+	USART1_send("TEXT 85,130,\"TSS24.BF2\",0,1,1,",strlen("TEXT 85,130,\"TSS24.BF2\",0,1,1,"));
 	USART1_send((char*)mac_char,MAC_LEN);
 	USART1_send("PRINT 1\r\n",strlen("PRINT 1\r\n"));
 }

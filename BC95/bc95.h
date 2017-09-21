@@ -44,6 +44,7 @@ void bc95_request_connetion_status(void);
 
 void bc95_creat_UDP_socket(char* port);
 u8 bc95_UDP_send_messages(char socket,char* ip_addr,char* port,u32 len,u8* data);
+u8 bc95_UDP_receive_commend(u32 len);
 void bc95_close_socket(void);
 
 #endif
