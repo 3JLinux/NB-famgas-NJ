@@ -174,7 +174,7 @@ void shell_handle(void)
 *****************************************************/
 void level_printf_char(u8 level,char *printf_head,void *printf_data,u32 printf_num)
 {
-	u8 i;
+	u32 i;
 	if(level <= shell_level)
 	{
 		for(i = 0;i < strlen((char *)printf_head);i++)
@@ -206,7 +206,7 @@ void level_printf_char(u8 level,char *printf_head,void *printf_data,u32 printf_n
 *****************************************************/
 void level_printf_hex(u8 level,char *printf_head,void *printf_data,u32 printf_num)
 {
-	u8 i;
+	u32 i;
 	if(level <= shell_level)
 	{
 		for(i = 0;i < strlen((char *)printf_head);i++)
@@ -238,7 +238,7 @@ void level_printf_hex(u8 level,char *printf_head,void *printf_data,u32 printf_nu
 *****************************************************/
 void level_printf_int(u8 level,char *printf_head,void *printf_data,u32 printf_num)
 {
-	u8 i;
+	u32 i;
 	if(level <= shell_level)
 	{
 		for(i = 0;i < strlen((char *)printf_head);i++)

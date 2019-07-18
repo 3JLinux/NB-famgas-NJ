@@ -1,4 +1,6 @@
 #include "fram_gas.h"
+#include "string.h"
+#include "crc16.h"
 
 
 void fram_gas_init(void)
@@ -16,5 +18,29 @@ void fram_gas_init(void)
 }
 
 
-
+#define GAS_AGREEMENT_CRC_LEN	6
+#define GAS_AGREEMENT_LEN		8
+u8 fram_gas_read_packet(u8 *fram_gas_485_packet,u8 slave_addr,u8 cmd,u8 *star_addr,u8 *register_num)
+{
+	u16 crc16_num; 
+	GAS_AGREEMENT *pFrame = NULL;
+	if (NULL == fram_gas_485_packet)
+	{
+		return 0;
+	}
+	pFrame = (GAS_AGREEMENT*)fram_gas_485_packet;
+	pFrame->GASslave_addr = slave_addr;
+	pFrame->GASfunction_code = cmd;
+	memcpy(pFrame->GASregister_star_addr,star_addr,2);
+	memcpy(pFrame->GASregister_num,register_num,2);
+	crc16_num = crc16((u8*)pFrame,GAS_AGREEMENT_CRC_LEN);
+	pFrame->GAScrc[1] = crc16_num>>8 & 0xFF;
+	pFrame->GAScrc[0] = crc16_num & 0xFF;
+	//if(strlen((const char*)fram_gas_485_packet) >= GAS_AGREEMENT_LEN)
+	{
+		memcpy(fram_gas_485_packet,pFrame,GAS_AGREEMENT_LEN);
+		return GAS_AGREEMENT_LEN;
+	}
+	return 0;
+}
 

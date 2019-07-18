@@ -3,7 +3,9 @@
 
 void Get_Device_MAC(u8* mac)
 {
+	
   u8 i = 0;
+	/*
   u16 srand_data;
 
   srand_data = crc16((unsigned char *)0x08007800, 6); 
@@ -16,5 +18,10 @@ void Get_Device_MAC(u8* mac)
 
   srand_data = crc16((unsigned char *)0x08007800, 12); 
   srand( (u32)srand_data );
+	*/
+  mac[i++] = *(unsigned char*)0x800FFF3;
+  mac[i++] = *(unsigned char*)0x800FFF2;
+  mac[i++] = *(unsigned char*)0x800FFF1;
+  mac[i++] = *(unsigned char*)0x800FFF0;
 }
 

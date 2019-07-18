@@ -35,7 +35,7 @@ int fputc(int ch, FILE *f)
 }
 #endif 
 
-void USART1_send(char *data,u8 num)
+void USART1_send(char *data,u32 num)
 {
 	//u8 temp_buf[100];
 	u8 i;
@@ -182,7 +182,7 @@ void uart2_init(u32 bound){
   //Usart2 NVIC 配置
   NVIC_InitStructure.NVIC_IRQChannel = USART2_IRQn;
 	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority=3 ;//抢占优先级3
-	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 2;		//子优先级3
+	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 1;		//子优先级3
 	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;			//IRQ通道使能
 	NVIC_Init(&NVIC_InitStructure);	//根据指定的参数初始化VIC寄存器
   
@@ -298,7 +298,7 @@ void uart3_init(u32 bound){
   //Usart3 NVIC 配置
   NVIC_InitStructure.NVIC_IRQChannel = USART3_IRQn;
 	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority=3 ;//抢占优先级3
-	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 1;		//子优先级3
+	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 2;		//子优先级3
 	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;			//IRQ通道使能
 	NVIC_Init(&NVIC_InitStructure);	//根据指定的参数初始化VIC寄存器
   
@@ -318,10 +318,10 @@ void uart3_init(u32 bound){
 }
 
 
-void USART3_send(char *data,u8 num)
+void USART3_send(char *data,u32 num)
 {
 	//u8 temp_buf[100];
-	u8 i;
+	u32 i;
 //	u8 temp_buf[2];	//发送数据缓冲区
 //	if(  ring_buffer_len_used(&Usart2Tx_fifo_dev) && (USART2->SR&0X40)  )
 //	{
@@ -335,7 +335,7 @@ void USART3_send(char *data,u8 num)
 	}
 }
 
-#define USART3_MAX_RX_SIZE		255
+#define USART3_MAX_RX_SIZE		512
 volatile u32 USART3_RX_STA = 0;
 u8 USART3_RX_BUF[USART3_MAX_RX_SIZE];
 //#define USART2_TX_FIFO_SIZE  256  //size must be power of 2. 
@@ -351,7 +351,7 @@ u8 USART3_RX_BUF[USART3_MAX_RX_SIZE];
 
 
 
-void USART3_IRQHandler(void)                	//串口2中断服务程序
+void USART3_IRQHandler(void)                	//串口3中断服务程序
 	{
 	//u8 Res;
 #if SYSTEM_SUPPORT_OS 		//如果SYSTEM_SUPPORT_OS为真，则需要支持OS.

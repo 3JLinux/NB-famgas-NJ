@@ -5,9 +5,11 @@
 #include "usart.h"
 #include "shell.h"
 
+#define USE_COAP	1
+
 #define BC95_PRINTF_LEVEL		8
 
-extern void USART3_send(char *data,u8 num);
+extern void USART3_send(char *data,u32 num);
 #define	bc95_Send_Data USART3_send
 
 u8 bc95_setID(u8* id_num);
@@ -35,6 +37,7 @@ void bc95_query_IMSI(void);
 void bc95_Configuration_PDP(void);
 void bc95_request_bands(void);
 void bc95_set_network_reg_status(void);
+void bc95_query_UE_statistics_CELL(void);
 void bc95_set_connetion_status(void);
 void bc95_select_PLMN(void);
 void bc95_activate_network(void);
@@ -46,6 +49,12 @@ void bc95_creat_UDP_socket(char* port);
 u8 bc95_UDP_send_messages(char socket,char* ip_addr,char* port,u32 len,u8* data);
 u8 bc95_UDP_receive_commend(u32 len);
 void bc95_close_socket(void);
+
+void bc95_creat_COAP_socket(char* ip_addr,char* port);
+u8 bc95_COAP_send_messages(u32 len,u8* data);
+void bc95_request_CDP_server(void);
+void bc95_NSMI(void);
+void bc95_NNMI(void);
 
 #endif
 

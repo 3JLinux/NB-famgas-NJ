@@ -21,10 +21,10 @@ static const char comma[] = ",";
 *****************************************************/
 static void bc95_send_cmd(const char *cmd)
 {
-	static char bc95_send_buff[256] = {0};
-	u8 bc95_send_num = 0;
-	u8 i;
-	if(cmd != NULL && (strlen((char*)cmd)) < 256)
+	static char bc95_send_buff[512] = {0};
+	u32 bc95_send_num = 0;
+	u32 i;
+	if(cmd != NULL && (strlen((char*)cmd)) < 512)
 	{
 		bc95_send_num = strlen((char *)cmd);
 		memcpy(bc95_send_buff,cmd,bc95_send_num);
@@ -103,9 +103,9 @@ void bc95_request_sofware(void)
 输入：			无
 返回：			无
 *****************************************************/
-void bc95_request_(void)
+void bc95_request_IMEI(void)
 {
-	bc95_send_cmd("AT+CGMR");
+	bc95_send_cmd("AT+CGSN=1");
 }
 
 /*****************************************************
@@ -141,6 +141,17 @@ void bc95_get_singal(void)
 void bc95_query_UE_statistics(void)
 {
 	bc95_send_cmd("AT+NUESTATS");
+}
+
+/*****************************************************
+函数原型： 		void bc95_query_UE_statistics_CELL(void)
+功能：			Query UE Statistics
+输入：			无
+返回：			无
+*****************************************************/
+void bc95_query_UE_statistics_CELL(void)
+{
+	bc95_send_cmd("AT+NUESTATS=CELL");
 }
 
 
@@ -493,6 +504,84 @@ u8 bc95_UDP_receive_commend(u32 len)
 	}
 	return SUCCEED;
 }
+
+
+/*****************************************************
+函数原型： 		void bc95_creat_COAP_socket(void)
+功能：			Create a Socket
+输入：			无
+返回：			无
+*****************************************************/
+void bc95_creat_COAP_socket(char* ip_addr,char* port)
+{
+	char send_cmd_buffer[100] = {0};
+	const char set_UDP_socket[] = "AT+NCDP=";
+	memcpy(send_cmd_buffer,set_UDP_socket,strlen(set_UDP_socket));
+	strcat(send_cmd_buffer,ip_addr);
+	strcat(send_cmd_buffer,comma);
+	strcat(send_cmd_buffer,port);
+	bc95_send_cmd(send_cmd_buffer);
+}
+
+
+/*****************************************************
+函数原型： 		void bc95_request_CDP_server(void)
+功能：			Query CDP server
+输入：			无
+返回：			无
+*****************************************************/
+void bc95_request_CDP_server(void)
+{
+	bc95_send_cmd("AT+NCDP?");
+}
+
+/*****************************************************
+函数原型： 		void bc95_NSMI(void)
+功能：			Sent message indications is enabled
+输入：			无
+返回：			无
+*****************************************************/
+void bc95_NSMI(void)
+{
+	bc95_send_cmd("AT+NSMI=1");
+}
+
+/*****************************************************
+函数原型： 		void bc95_NNMI(void)
+功能：			Sent message indications is enabled
+输入：			无
+返回：			无
+*****************************************************/
+void bc95_NNMI(void)
+{
+	bc95_send_cmd("AT+NNMI=2");
+}
+
+
+/*****************************************************
+函数原型： 		void bc95_UDP_send_messages()
+功能：			UDP Send messages
+输入：			无
+返回：			无
+*****************************************************/
+#define COAP_SEND_MAX 512
+u8 bc95_COAP_send_messages(u32 len,u8* data)
+{
+	char send_cmd_buffer[512] = {0};
+	const char coap_send_messages[] = "AT+NMGS=";
+	if((len >= COAP_SEND_MAX) ||(data == NULL) || (len == 0) || (len == NULL))
+	{
+		return DATA_ERROR;
+	}
+	memcpy(send_cmd_buffer,coap_send_messages,strlen(coap_send_messages));
+	strcat(send_cmd_buffer,u32_to_hex(len));
+	strcat(send_cmd_buffer,comma);
+	strcat(send_cmd_buffer,(char*)data);
+	bc95_send_cmd(send_cmd_buffer);
+	//bc95_send_cmd("AT+NSOST=0,119.29.155.148,4568,4,22061740");
+	return SUCCEED;
+}
+
 
 #endif
 

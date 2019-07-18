@@ -56,7 +56,7 @@
 #define GPRS_RX_BUFFER_GET		usart2_rx_buffer_get
 #define GPRS_RX_BUFFER_CLEAN	usart2_rx_buffer_clean
 
-
+#ifndef USE_COAP
 #define MAC_LENTH		4
 typedef struct gprs_agreement
 {
@@ -70,10 +70,46 @@ typedef struct gprs_agreement
 	u8 grrsHostMac[MAC_LENTH];
 	u8 gprsData[]; //data + CRC_L + CRC_H + gprsTrail
 }GPRS_AGREEMENT;
+#else
 
+typedef struct gprs_coap_agreement
+{
+	u8 messageld[2];
+	u8 coapHead[4];
+	u8 coapSynCmd[4];
+	u8 coapCmd[4];
+	u8 coaptype[4];
+	u8 coapIMEI[32];
+	u8 coapIMSI[32];
+	u8 coapPowerValue[4];
+	u8 coapRSSI[4];
+	u8 coapEARFCN[4];
+	u8 coapSNR[4];
+	u8 coapECL[4]; 
+	u8 coapRSRP[4];
+	u8 coapPCI[4];
+	u8 coapLength[4];
+	u8 coapData[]; //data + CRC_L + CRC_H + gprsTrail
+}GPRS_COAP_AGREEMENT;
+#endif
 
 
 void gprs_handle(void);
+#ifndef USE_COAP
 s32 gprs_send_data_packet(u8* pioBuf, u8 ubCmd, u16 uwSeq, const u8 *pcMAC, const u8 *pcData, u16 dataLen);
-
+#else
+s32 gprs_coap_send_data_packet(u8* pioBuf, u8* type, const u8 *pcIMEI, const u8 *pcIMSI, u8* power_value, 
+	u8 *pcRSSI, u8* pcEARFCN,u8* pcECL,u8* pcSNR,u8* pcRSRP,u8* pcPCI,const u8 *pcData, u16 dataLen);
+#endif
+void stringtoint(u8* dst,char* scr,u8 length,u8 negative);
+extern u8 COAP_RSSI[4];
+extern u8 COAP_EARFCN[4];
+extern u8 COAP_RSRP[4];
+extern u8 COAP_PCI[4];
+extern u8 COAP_IMEI[16];
+extern u8 COAP_IMSI[16];
+extern u8 COAP_TYPE[4];
+extern u8 COAP_POWERVALUE[4];
+extern u8 COAP_ECL[4]; 
+extern u8 COAP_SNR[4];
 #endif

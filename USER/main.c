@@ -46,10 +46,22 @@ static int osqGetOut0xef(u8* pbuf,const u8* pdata, u32 len);
 #define sim800a_rx_buffer_get	usart2_rx_buffer_get
 #endif
 
+#ifndef USE_COAP
 //const char UDP_local_port[] = "4569";			//端口
 const char UDP_local_port[] = "4568";			//端口 
 //const char UDP_ipv4_addr[] = "119.29.224.28";	//测试服务器
 const char UDP_ipv4_addr[] = "119.29.155.148";	//正式服务器
+#else
+//const char UDP_local_port[] = "5683";
+//const char UDP_ipv4_addr[] = "180.101.147.115";//测试
+
+const char UDP_local_port[] = "5683";
+const char UDP_ipv4_addr[] = "117.60.157.137";//测试
+#endif
+
+#define fram_gas_485_rx_buffer_clean	usart2_rx_buffer_clean
+#define fram_gas_485_rx_buffer_get		usart2_rx_buffer_get
+#define fram_gas_485_send 				USART2_send
 
 #ifdef USE_BC95
 static u8 bc95_creat_network_connetion(void);
@@ -74,6 +86,7 @@ static u8 rec_len = 0;
 #endif
 
 static void QR_printf(void);
+static u8 change2tvl(u8* src,u8* dst);
 
 /////////////////////////UCOSII任务设置///////////////////////////////////
 //START 任务
@@ -119,6 +132,28 @@ void shell_task(void *pdata);
 ////任务函数
 //void led1_task(void *pdata);
 
+
+//485任务
+//设置任务优先级
+#define FRAM_GSA_RS_485_TASK_PRIO       			6 
+//设置任务堆栈大小
+#define FRAM_GSA_RS485_STK_SIZE  					512
+//任务堆栈
+OS_STK FRAM_GSA_RS485_TASK_STK[FRAM_GSA_RS485_STK_SIZE];
+//任务函数
+void fram_gas_rs485_task(void *pdata);
+
+//485任务
+//设置任务优先级
+#define FRAM_GSA_RS_485_REC_TASK_PRIO       			7 
+//设置任务堆栈大小
+#define FRAM_GSA_RS485_REC_STK_SIZE  					512
+//任务堆栈
+OS_STK FRAM_GSA_RS485_REC_TASK_STK[FRAM_GSA_RS485_REC_STK_SIZE];
+//任务函数
+void fram_gas_rs485_rec_tack(void *pdata);
+
+
 //燃气报警任务
 //设置任务优先级
 #define FRAM_GSA_TASK_PRIO       			5 
@@ -162,7 +197,7 @@ OS_STK BC95_TASK_STK[BC95_STK_SIZE];
 void bc95_task(void *pdata);
 
 OS_EVENT * q_bc95_send_msg;
-void * MsgGrp[256];			//消息队列存储地址,最大支持256个消息
+void * MsgGrp[350];			//消息队列存储地址,最大支持256个消息
 #endif
 
 
@@ -180,33 +215,58 @@ OS_STK SIM800A_TASK_STK[SIM800A_STK_SIZE];
 void sim800a_task(void *pdata);
 
 OS_EVENT * q_sim800a_send_msg;
-void * MsgGrp[256];			//消息队列存储地址,最大支持256个消息
+void * MsgGrp[350];			//消息队列存储地址,最大支持256个消息
 #endif
 
 OS_TMR	*heartbeat_tmr;
 OS_TMR  *feeddog_tmr;
-static void heartbeat_tmr_callback(void);
+//static void heartbeat_tmr_callback(void);
 static void feeddog_tmr_callback(void);
 
 static u8 connetion_state = NET_CONNRTION_ERR;  //网络连接状态
 static u16 seq = 0;
-static u8 mac[4] = {0x01,0x02,0x03,0x04};
+static u8 mac[4] = {0x79,0xC1,0x11,0x11};
+//static u8 mac[4] = {0};
 
  int main(void)
- {	
+ {
+	u8* presp = NULL;
+	char* str = NULL;
+	u32 len = 0;
 	delay_init();	    	 //延时函数初始化	
 	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);// 设置中断优先级分组2
-	//LED_Init();		  	//初始化与LED连接的硬件接口
+	LED_Init();		  	//初始化与LED连接的硬件接口
 	fram_gas_init();
 	uart_init(9600);
 	//Get_Device_MAC(mac);
-	uart2_init(9600);
+	uart2_init(4800);
 	uart3_init(9600);
 	delay_ms(2000);
+	while(1)
+	{		
+		bc95_request_IMEI();
+		delay_ms(500);
+		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"OK");
+		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+	
+		str = strstr((char*)bc95_rx_buffer_get(&len),"CGSN");
+		if(str!=NULL)
+		{
+			memcpy(COAP_IMEI,str+5,15);
+			COAP_IMEI[15] = '0';
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_IMEI:",COAP_IMEI,16);
+			bc95_rx_buffer_clean();
+			break;
+		}
+		bc95_rx_buffer_clean();
+	}
+		
 	QR_printf();
 	delay_ms(2000);
 	uart_init(921600);
-//	IWDG_Init(4,625*10);
+	//IWDG_Init(4,625*10);
+	POWER_LED = 1;
+	SINGAL_LED = 0;
 	OSInit();   
  	OSTaskCreate(start_task,(void *)0,(OS_STK *)&START_TASK_STK[START_STK_SIZE-1],START_TASK_PRIO );//创建起始任务
 	OSStart();	
@@ -233,14 +293,17 @@ void start_task(void *pdata)
 	//OSTaskCreate(heartbeat_task,(void *)0,(OS_STK*)&HEARTBEAT_TASK_STK[HEARTBEAT_STK_SIZE-1],HEARTBEAT_TASK_PRIO);
 #ifdef	USE_BC95
 	OSTaskCreate(bc95_task,(void *)0,(OS_STK*)&BC95_TASK_STK[BC95_STK_SIZE-1],BC95_TASK_PRIO);
-	OSTaskCreate(fram_gas_task,(void *)0,(OS_STK*)&FRAM_GSA_TASK_STK[FRAM_GSA_STK_SIZE-1],FRAM_GSA_TASK_PRIO);
+	//OSTaskCreate(fram_gas_task,(void *)0,(OS_STK*)&FRAM_GSA_TASK_STK[FRAM_GSA_STK_SIZE-1],FRAM_GSA_TASK_PRIO);
 #endif
 #ifdef	USE_SIM800A
 	OSTaskCreate(sim800a_task,(void *)0,(OS_STK*)&SIM800A_TASK_STK[SIM800A_STK_SIZE-1],SIM800A_TASK_PRIO);
 #endif
-	heartbeat_tmr = OSTmrCreate((3*60*100),(3*60*100),OS_TMR_OPT_PERIODIC,(OS_TMR_CALLBACK)heartbeat_tmr_callback,0,(INT8U*)"heartbeat_tmr",&err);
-	//feeddog_tmr = OSTmrCreate((100),(100),OS_TMR_OPT_PERIODIC,(OS_TMR_CALLBACK)feeddog_tmr_callback,0,(INT8U*)"feeddog_tmr",&err);
-	OSTmrStart(heartbeat_tmr,&err);
+	OSTaskCreate(fram_gas_rs485_task,(void *)0,(OS_STK*)&FRAM_GSA_RS485_TASK_STK[FRAM_GSA_RS485_STK_SIZE-1],FRAM_GSA_RS_485_TASK_PRIO);
+	OSTaskCreate(fram_gas_rs485_rec_tack,(void *)0,(OS_STK*)&FRAM_GSA_RS485_REC_TASK_STK[FRAM_GSA_RS485_REC_STK_SIZE-1],FRAM_GSA_RS_485_REC_TASK_PRIO);
+	
+	//heartbeat_tmr = OSTmrCreate((10*60*100),(10*60*100),OS_TMR_OPT_PERIODIC,(OS_TMR_CALLBACK)heartbeat_tmr_callback,0,(INT8U*)"heartbeat_tmr",&err); //心跳时间软件定时器
+	//feeddog_tmr = OSTmrCreate((100),(100),OS_TMR_OPT_PERIODIC,(OS_TMR_CALLBACK)feeddog_tmr_callback,0,(INT8U*)"feeddog_tmr",&err); //喂狗软件定时器
+	//OSTmrStart(heartbeat_tmr,&err);
 	//OSTmrStart(feeddog_tmr,&err);
 	OSTaskSuspend(START_TASK_PRIO);	//挂起起始任务.
 	OS_EXIT_CRITICAL();				//退出临界区(可以被中断打断)
@@ -270,18 +333,20 @@ void start_task(void *pdata)
 //	}
 //}
 
+/*
 //报警任务
 void fram_gas_task(void *pdata)
 {
 	u8 nFrameL = 0;
 	static u8 fram_gas_alarm_packet[14] = {0};
 	static u8 fram_gas_alarm_packet_buffer[28] = {0};
+	static u8 fram_gas_alarm_count = 0;
 	u8 i;
 	while(1)
 	{
 		if(connetion_state != NET_CONNRTION_ERR && FRAM_GAS_ALARM)
 		{
-			if(bc95_send_ok)
+			if(bc95_send_ok && (fram_gas_alarm_count < 3))
 			{
 				for(i=0;i<28;i++)
 				{
@@ -290,17 +355,184 @@ void fram_gas_task(void *pdata)
 				nFrameL = gprs_send_data_packet(fram_gas_alarm_packet,GPRS_CMD_ALARM,seq,mac,NULL,0);
 				osqGetOut0x00(fram_gas_alarm_packet_buffer,fram_gas_alarm_packet,nFrameL);
 				OSQPost(q_bc95_send_msg,(void *)fram_gas_alarm_packet_buffer);
+				fram_gas_alarm_count++;
 			}
 		}
-		delay_ms(3000);
+		if(!FRAM_GAS_ALARM)
+		{
+			fram_gas_alarm_count = 0;
+		}
+		delay_ms(500);
+	}
+}
+*/
+
+#define SLAVE_ADDR		0x01
+#define RS485_READ_CMD	0x03
+static u8 star_addr[2] = {0x00,0x08};
+static u8 star_num[2] = {0x00,0x05};
+static u8 sec_addr[2] = {0x00,0x10};
+static u8 sec_num[2] = {0x00,0x02};
+static u8 third_addr[2] = {0x00,0x13};
+static u8 third_num[2] = {0x00,0x02};
+
+static u8 fram_gas_485_send_flag = 0;
+void fram_gas_rs485_task(void *pdata)
+{
+	static u8 fram_gas_485_packet[30] = {0};
+	u8 len = 0;
+	static u8 first_star = 1;
+	u8 i;
+	while(1)
+	{
+		if(first_star)
+		{
+			for(i=0;i<100;i++)
+			{
+				delay_ms(1000);
+			}
+		}
+		first_star = 0;
+		len = fram_gas_read_packet(fram_gas_485_packet,SLAVE_ADDR,RS485_READ_CMD,star_addr,star_num);
+		fram_gas_485_send((char*)fram_gas_485_packet,len);
+		fram_gas_485_send_flag = 1;
+		delay_ms(2000);
+		len = fram_gas_read_packet(fram_gas_485_packet,SLAVE_ADDR,RS485_READ_CMD,sec_addr,sec_num);
+		fram_gas_485_send((char*)fram_gas_485_packet,len);
+		fram_gas_485_send_flag = 2;
+		delay_ms(2000);
+		len = fram_gas_read_packet(fram_gas_485_packet,SLAVE_ADDR,RS485_READ_CMD,third_addr,third_num);
+		fram_gas_485_send((char*)fram_gas_485_packet,len);
+		fram_gas_485_send_flag = 3;
+		delay_ms(2000);
 	}
 }
 
-////心跳任务
-//void heartbeat_tmr_callback(OS_TMR *ptmr,void *p_arg)
-//{
-//	
-//}
+static u8 bc95_send_lock = 0;
+
+#define RS_485_REC_MIN_NUM		7
+#define RS_485_REC_MAX_NUM		255
+static u8 rs485_rec_data[20] = {0};
+void fram_gas_rs485_rec_tack(void *pdata)
+{
+	static u32 len = 0;
+	static u8 pren[50] = {0};
+	u8 i;
+	u32 nFrameL = 0;
+	static u8 rs485_packet[350] = {0};
+	static u8 rs485_packet_send[350] = {0};
+	static u8 net_sent_flag = 0;
+	static u32 net_send_count = 10 * 10;
+	static u8 net_alarm_count = 10 *10;
+	static u8 net_alarm_flag = 0;
+	static u8 tlv_packet[50]={0};
+	u8 tlv_len = 0;
+	while(1)
+	{
+		memcpy(pren,fram_gas_485_rx_buffer_get(&len),len);
+		if(len >= RS_485_REC_MIN_NUM && len <= RS_485_REC_MAX_NUM)
+		{
+			for(i=0;i<len;i++)
+			{
+				if(pren[i] == SLAVE_ADDR && pren[i + 1] == RS485_READ_CMD)
+				{
+					if(pren[i + 2] <= (len - 2))
+					{
+						SINGAL_LED = ~SINGAL_LED;
+						rs485_rec_data[0] = 1;
+						rs485_rec_data[1] = 18;
+						switch(fram_gas_485_send_flag)
+						{
+							case 1:memcpy((rs485_rec_data + 2),(pren + i + 3),10);break;
+							case 2:memcpy((rs485_rec_data + 12),(pren + i + 3),4);break;
+							case 3:memcpy((rs485_rec_data + 16),(pren + i + 3),4);net_sent_flag = 1;break;
+							default:break;
+						}
+						for(i=0;i<len;i++)
+						{
+							pren[i] = 0;
+						}
+						fram_gas_485_rx_buffer_clean();
+						fram_gas_485_send_flag = 0;
+					}
+					//XPRINT(level_printf_hex,BC95_PRINTF_LEVEL,"RS485 REC:",rs485_rec_data,20);
+				}
+			}
+		}
+		else if(len > RS_485_REC_MAX_NUM)
+		{
+			fram_gas_485_rx_buffer_clean();
+		}
+		if(net_sent_flag)
+		{
+			net_sent_flag = 0;
+			net_send_count++;
+			/*
+			if(net_send_count>=10)
+			{
+				net_send_count = 0;
+				bc95_send_lock = 0;
+			}
+			*/
+			if(net_alarm_flag)
+			{
+				net_alarm_count++;
+			}
+			if((connetion_state != NET_CONNRTION_ERR) && (rs485_rec_data[13] != 0) && (net_alarm_count>=10*10))
+			{
+				net_alarm_flag = 1;
+				net_alarm_count = 0;
+				for(i=0;i<50;i++)
+				{
+					rs485_packet[i] = 0;
+					rs485_packet_send[i] = 0;
+				}
+#ifndef USE_COAP
+				nFrameL = gprs_send_data_packet(rs485_packet,GPRS_CMD_DATA,seq,mac,rs485_rec_data,20); //数据按协议打包
+				osqGetOut0x00(rs485_packet_send,rs485_packet,nFrameL);					//将0转化0xef 0xe0，使消息队列能正常发送
+				XPRINT(level_printf_hex,BC95_PRINTF_LEVEL,"RS485 SEND:",rs485_packet_send,strlen((char*)rs485_packet_send));
+				OSQPost(q_bc95_send_msg,(void *)rs485_packet_send);
+#else
+				tlv_len = change2tvl(rs485_rec_data+2,tlv_packet);
+				nFrameL = gprs_coap_send_data_packet(rs485_packet,COAP_TYPE,COAP_IMEI,COAP_IMSI,COAP_POWERVALUE,COAP_RSSI,\
+				COAP_EARFCN,COAP_ECL,COAP_SNR,COAP_RSRP,COAP_PCI,tlv_packet,tlv_len);
+				osqGetOut0x00(rs485_packet_send,rs485_packet,nFrameL);
+				XPRINT(level_printf_hex,BC95_PRINTF_LEVEL,"RS485 SEND:",rs485_packet_send,strlen((char*)rs485_packet_send));
+				OSQPost(q_bc95_send_msg,(void *)rs485_packet_send);
+#endif
+			}
+			if(rs485_rec_data[13] == 0)
+			{
+				net_alarm_count = 10*10;
+				net_alarm_flag = 0;
+			}
+			if((connetion_state != NET_CONNRTION_ERR)&&(net_send_count>=10*10) && (bc95_send_lock == 0))
+			{
+				net_send_count = 0;
+				for(i=0;i<50;i++)
+				{
+					rs485_packet[i] = 0;
+					rs485_packet_send[i] = 0;
+				}
+#ifndef USE_COAP
+				nFrameL = gprs_send_data_packet(rs485_packet,GPRS_CMD_DATA,seq,mac,rs485_rec_data,20); //数据按协议打包
+				osqGetOut0x00(rs485_packet_send,rs485_packet,nFrameL);					//将0转化0xef 0xe0，使消息队列能正常发送
+				XPRINT(level_printf_hex,BC95_PRINTF_LEVEL,"RS485 SEND:",rs485_packet_send,strlen((char*)rs485_packet_send));
+				OSQPost(q_bc95_send_msg,(void *)rs485_packet_send);
+#else
+				tlv_len = change2tvl(rs485_rec_data+2,tlv_packet);
+				nFrameL = gprs_coap_send_data_packet(rs485_packet,COAP_TYPE,COAP_IMEI,COAP_IMSI,COAP_POWERVALUE,COAP_RSSI,\
+				COAP_EARFCN,COAP_ECL,COAP_SNR,COAP_RSRP,COAP_PCI,tlv_packet,tlv_len);
+				osqGetOut0x00(rs485_packet_send,rs485_packet,nFrameL);
+				XPRINT(level_printf_hex,BC95_PRINTF_LEVEL,"RS485 SEND:",rs485_packet_send,strlen((char*)rs485_packet_send));
+				OSQPost(q_bc95_send_msg,(void *)rs485_packet_send);
+#endif
+			}
+		}
+		delay_ms(600);
+	}
+}
+
 
 
 //喂狗回调函数
@@ -310,6 +542,7 @@ void feeddog_tmr_callback(void)
 	delay_ms(100);
 }
 
+/*
 //心跳回调函数
 void heartbeat_tmr_callback(void)
 {
@@ -333,15 +566,16 @@ void heartbeat_tmr_callback(void)
 	}
 	delay_ms(100);
 }
+*/
 
 //static u8 close_flag = FALSE;
 //shell任务
 void shell_task(void *pdata)
 {	  
-	static u8 heartbeat_packet[14] = {0};
+	static u8 heartbeat_packet[100] = {0};
 	u8 nFrameL = 0;
 	//u8 test[50] = {0};
-	static u8 test_change[80] = {0};
+	static u8 test_change[200] = {0};
 	u8 i;
 	//const static u8 hostMac[4] = {0x22,0x06,0x17,0x40};
 	//const static u8 testData[4] = {0};
@@ -416,9 +650,17 @@ void shell_task(void *pdata)
 				{
 					test_change[i] = 0;
 				}
+#ifndef USE_COAP
 				nFrameL = gprs_send_data_packet(heartbeat_packet,GPRS_CMD_HEART,seq,mac,NULL,0);
 				osqGetOut0x00(test_change,heartbeat_packet,nFrameL);
 				OSQPost(q_bc95_send_msg,(void *)test_change);
+#else
+				nFrameL = gprs_coap_send_data_packet(heartbeat_packet,COAP_TYPE,COAP_IMEI,COAP_IMSI,COAP_POWERVALUE,COAP_RSSI,\
+				COAP_EARFCN,COAP_ECL,COAP_SNR,COAP_RSRP,COAP_PCI,rs485_rec_data,20);
+				osqGetOut0x00(test_change,heartbeat_packet,nFrameL);
+				XPRINT(level_printf_hex,BC95_PRINTF_LEVEL,"RS485 SEND:",heartbeat_packet,strlen((char*)heartbeat_packet));
+				OSQPost(q_bc95_send_msg,(void *)test_change);
+#endif
 			}
 #endif
 #ifdef USE_SIM800A
@@ -459,9 +701,9 @@ void bc95_task(void *pdata)
 	static u8 first_star = TRUE;
 	u8 err;
 	u8 *p = NULL;
-	static u8 p_buffer[200] = {0};
-	static u8 test_buffer[80] = {0};
-	u8 i;
+	static u8 p_buffer[350] = {0};
+	static u8 test_buffer[350] = {0};
+	u32 i;
 //	u8* presp = NULL;
 	u32 len = 0;
 //	u8 restaar_count = 0;
@@ -469,6 +711,7 @@ void bc95_task(void *pdata)
 	{
 		if(connetion_state == NET_CONNRTION_ERR)
 		{
+			POWER_LED = 1;
 			do
 			{
 				if(first_star == TRUE)
@@ -494,9 +737,19 @@ void bc95_task(void *pdata)
 		else
 		{
 			p = OSQPend(q_bc95_send_msg,0,&err);		//调试的消息队列
+			XPRINT(level_printf_hex,BC95_PRINTF_LEVEL,"q_bc95_send_msg",p,strlen((char*)p));
+			POWER_LED = 0;
+			bc95_send_lock = 1;
 			bc95_send_ok = FALSE;
+#ifndef USE_COAP
 			len = osqGetOut0xef(test_buffer,p,strlen((char*)p));
 			hex2char(test_buffer,p_buffer,len);
+#else
+			len = osqGetOut0xef(test_buffer,p,strlen((char*)p));
+			//hex2char(test_buffer,p_buffer,len);
+			memcpy(p_buffer,test_buffer,len);
+			len/=2;
+#endif
 			for(i=0;i<strlen((char*)test_buffer);i++)
 			{
 				test_buffer[i] = 0;
@@ -526,6 +779,7 @@ void bc95_task(void *pdata)
 //						{
 //							bc95_rx_buffer_clean();
 //						}
+						bc95_send_lock = 0;
 						bc95_rx_buffer_clean();
 						break;
 					}
@@ -536,11 +790,14 @@ void bc95_task(void *pdata)
 				}
 				else
 				{
+					bc95_send_lock = 0;
 					connetion_state = NET_CONNRTION_ERR;
 					XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 connetion:","NET_CONNRTION_ERR",strlen("NET_CONNRTION_ERR"));
+					XPRINT(level_printf_hex,BC95_PRINTF_LEVEL,"bc95 UDP send",p_buffer,strlen((char*)p_buffer));
 					break;
 				}
 			}
+			bc95_send_lock = 0;
 			bc95_send_ok = TRUE;
 			delay_ms(500);
 //			bc95_close_socket();
@@ -811,6 +1068,15 @@ u8 bc95_creat_network_connetion(void)
 			return NET_CONNRTION_ERR;
 		}
 	}
+	//for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
+	{
+		// 
+		bc95_request_IMEI();
+		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
+		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"OK");
+		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+		bc95_rx_buffer_clean();
+	}
 	for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
 	{
 		//AT+NUESTATS 
@@ -929,7 +1195,9 @@ u8 bc95_creat_network_connetion(void)
 	u32 len;
 	u8* presp = NULL;
 	u8* key_word = NULL;
-	u8 i;
+	char* str = NULL;
+	u8 i,j;
+	u8 str_len = 0;
 	XPRINT(level_printf_char,DEFAULT_PRINTF_LEVEL,"bc95 connetion:",(void*)bc95_connetion_connet,strlen(bc95_connetion_connet));
 	for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
 	{
@@ -969,9 +1237,14 @@ u8 bc95_creat_network_connetion(void)
 	{
 		//AT+CIMI
 		bc95_query_IMSI();
-		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
+		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME*2);
 		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"OK");
 		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+		
+		memcpy(COAP_IMSI,bc95_rx_buffer_get(&len) + 2,15);
+		COAP_IMSI[15] = '0';
+		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_IMSI:",COAP_IMSI,16);
+		
 		bc95_rx_buffer_clean();
 		if(presp != NULL)
 		{
@@ -989,6 +1262,119 @@ u8 bc95_creat_network_connetion(void)
 		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
 		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"OK");
 		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+		/*
+		str = strstr((char*)bc95_rx_buffer_get(&len),"CSQ");
+		if(str!=NULL)
+		{
+			str_len = 0;
+			while(str[4+str_len] != ',')
+			{
+				str_len++;
+			}
+			stringtoint(COAP_RSSI,str+4,str_len,0);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSSI:",str+4,str_len);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSSI:",COAP_RSSI,4);
+		}
+*/		
+		bc95_rx_buffer_clean();
+		if(presp != NULL)
+		{
+			break;
+		}
+		else if(i == ATCMD_MAX_REPEAT_NUMS - 1)
+		{
+			return NET_CONNRTION_ERR;
+		}
+	}
+		bc95_request_IMEI();
+		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
+		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"OK");
+		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+	
+		str = strstr((char*)bc95_rx_buffer_get(&len),"CGSN");
+		if(str!=NULL)
+		{
+			memcpy(COAP_IMEI,str+5,15);
+			COAP_IMEI[15] = '0';
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_IMEI:",COAP_IMEI,16);
+		}
+	
+		bc95_rx_buffer_clean();
+	for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
+	{
+		//AT+NUESTATS
+		bc95_query_UE_statistics();
+		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
+		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"OK");
+		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+		
+		str = strstr((char*)bc95_rx_buffer_get(&len),"EARFCN");
+		if(str!=NULL)
+		{
+			str_len = 0;
+			while(str[7+str_len] != '\r')
+			{
+				str_len++;
+			}
+			stringtoint(COAP_EARFCN,str+7,str_len,0);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_EARFCN:",str+7,str_len);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_EARFCN:",COAP_EARFCN,4);
+		}
+		
+		str = strstr((char*)bc95_rx_buffer_get(&len),"ECL");
+		if(str!=NULL)
+		{
+			str_len = 0;
+			while(str[4+str_len] != '\r')
+			{
+				str_len++;
+			}
+			stringtoint(COAP_ECL,str+4,str_len,0);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_ECL:",str+4,str_len);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_ECL:",COAP_ECL,4);
+		}
+		
+		str = strstr((char*)bc95_rx_buffer_get(&len),"SNR");
+		if(str!=NULL)
+		{
+			str_len = 0;
+			while(str[4+str_len] != '\r')
+			{
+				str_len++;
+			}
+			stringtoint(COAP_SNR,str+4,str_len,0);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_SNR:",str+4,str_len);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_SNR:",COAP_SNR,4);
+		}
+		
+		str = strstr((char*)bc95_rx_buffer_get(&len),"RSRQ");
+		if(str!=NULL)
+		{
+			str_len = 0;
+			while(str[5+str_len] != '\r')
+			{
+				str_len++;
+			}
+			stringtoint(COAP_RSRP,str+6,str_len-1,1);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSRQ:",str+5,str_len);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSRQ:",COAP_RSRP,4);
+		}
+		
+		
+		str = strstr((char*)bc95_rx_buffer_get(&len),"PCI");
+		if(str!=NULL)
+		{
+			str_len = 0;
+			while(str[4+str_len] != '\r')
+			{
+				str_len++;
+			}
+			stringtoint(COAP_PCI,str+4,str_len,0);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_PCI:",str+4,str_len);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_PCI:",COAP_PCI,4);
+		}
+		
+		
 		bc95_rx_buffer_clean();
 		if(presp != NULL)
 		{
@@ -1001,11 +1387,44 @@ u8 bc95_creat_network_connetion(void)
 	}
 	for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
 	{
-		//AT+NUESTATS
-		bc95_query_UE_statistics();
+		//AT+NUESTATS=CELL
+		bc95_query_UE_statistics_CELL();
 		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
 		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"OK");
 		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+		
+		str = strstr((char*)bc95_rx_buffer_get(&len),"CELL,");
+		//str+=5;
+		if(str!=NULL)
+		{
+			str+=5;
+			for(j=0;j<4;j++)
+			{
+				str_len = 0;
+				while(str[str_len] != ',')
+				{
+					str_len++;
+				}
+				str+=str_len+1;
+			}
+			stringtoint(COAP_RSRP,str-str_len,str_len-1,1);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSRP:",str-str_len,str_len-1);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSRP:",COAP_RSRP,4);
+			
+			for(j=0;j<2;j++)
+			{
+				str_len = 0;
+				while(str[str_len] != ',')
+				{
+					str_len++;
+				}
+				str+=str_len+1;
+			}
+			stringtoint(COAP_RSSI,str-str_len,str_len-2,1);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSSI:",str-str_len,str_len-2);
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSSI:",COAP_RSSI,4);
+		}
+		
 		bc95_rx_buffer_clean();
 		if(presp != NULL)
 		{
@@ -1086,21 +1505,169 @@ u8 bc95_UDP_send(char* ip_addr,char* port,u32 length,u8* data)
 {
 	u32 len;
 	u8* presp = NULL;
-	u8 i;
+	u8 i,j;
 	char* bc95_rec_buffer = NULL;
-	u8 rec_len_buffer;
+	u32 rec_len_buffer;
+#ifndef USE_COAP
 	u8 socket = 0;
+#else
+	char* str = NULL;
+	u8 str_len = 0;
+#endif
 	if(connetion_state != UDP_SEND_SUCCEED)
 	{
+		
+#ifdef USE_COAP
 		for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
 		{
+			//AT+NUESTATS
+			bc95_query_UE_statistics();
+			delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
+			presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"OK");
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+			
+			str = strstr((char*)bc95_rx_buffer_get(&len),"EARFCN");
+			if(str!=NULL)
+			{
+				str_len = 0;
+				while(str[7+str_len] != '\r')
+				{
+					str_len++;
+				}
+				stringtoint(COAP_EARFCN,str+7,str_len,0);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_EARFCN:",str+7,str_len);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_EARFCN:",COAP_EARFCN,4);
+			}
+			
+			str = strstr((char*)bc95_rx_buffer_get(&len),"ECL");
+			if(str!=NULL)
+			{
+				str_len = 0;
+				while(str[4+str_len] != '\r')
+				{
+					str_len++;
+				}
+				stringtoint(COAP_ECL,str+4,str_len,0);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_ECL:",str+4,str_len);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_ECL:",COAP_ECL,4);
+			}
+			
+			str = strstr((char*)bc95_rx_buffer_get(&len),"SNR");
+			if(str!=NULL)
+			{
+				str_len = 0;
+				while(str[4+str_len] != '\r')
+				{
+					str_len++;
+				}
+				stringtoint(COAP_SNR,str+4,str_len,0);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_SNR:",str+4,str_len);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_SNR:",COAP_SNR,4);
+			}
+			
+			str = strstr((char*)bc95_rx_buffer_get(&len),"RSRQ");
+			if(str!=NULL)
+			{
+				str_len = 0;
+				while(str[5+str_len] != '\r')
+				{
+					str_len++;
+				}
+				stringtoint(COAP_RSRP,str+6,str_len-1,1);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSRQ:",str+5,str_len);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSRQ:",COAP_RSRP,4);
+			}
+			
+			
+			str = strstr((char*)bc95_rx_buffer_get(&len),"PCI");
+			if(str!=NULL)
+			{
+				str_len = 0;
+				while(str[4+str_len] != '\r')
+				{
+					str_len++;
+				}
+				stringtoint(COAP_PCI,str+4,str_len,0);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_PCI:",str+4,str_len);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_PCI:",COAP_PCI,4);
+			}
+			
+			
+			bc95_rx_buffer_clean();
+			if(presp != NULL)
+			{
+				break;
+			}
+			else if(i == ATCMD_MAX_REPEAT_NUMS - 1)
+			{
+				return NET_CONNRTION_ERR;
+			}
+		}
+		for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
+		{
+			//AT+NUESTATS=CELL
+			bc95_query_UE_statistics_CELL();
+			delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
+			presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"OK");
+			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+			
+			str = strstr((char*)bc95_rx_buffer_get(&len),"CELL,");
+			//str+=5;
+			if(str!=NULL)
+			{
+				str+=5;
+				for(j=0;j<4;j++)
+				{
+					str_len = 0;
+					while(str[str_len] != ',')
+					{
+						str_len++;
+					}
+					str+=str_len+1;
+				}
+				stringtoint(COAP_RSRP,str-str_len,str_len-1,1);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSRP:",str-str_len,str_len-1);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSRP:",COAP_RSRP,4);
+				
+				for(j=0;j<2;j++)
+				{
+					str_len = 0;
+					while(str[str_len] != ',')
+					{
+						str_len++;
+					}
+					str+=str_len+1;
+				}
+				stringtoint(COAP_RSSI,str-str_len,str_len-2,1);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSSI:",str-str_len,str_len-2);
+				XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"COAP_RSSI:",COAP_RSSI,4);
+			}
+			
+			bc95_rx_buffer_clean();
+			if(presp != NULL)
+			{
+				break;
+			}
+			else if(i == ATCMD_MAX_REPEAT_NUMS - 1)
+			{
+				return NET_CONNRTION_ERR;
+			}
+		}
+#endif
+		for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
+		{
+#ifndef USE_COAP
 			bc95_creat_UDP_socket(port);
+#else
+			bc95_creat_COAP_socket(ip_addr,port);
+#endif
 			delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
 			presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"ERROR");
 			XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
 			bc95_rx_buffer_clean();
 			if(presp == NULL)
 			{
+#ifndef USE_COAP
 				presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"1");
 				if(presp != NULL)
 				{
@@ -1110,6 +1677,7 @@ u8 bc95_UDP_send(char* ip_addr,char* port,u32 length,u8* data)
 				{
 					socket = 0;
 				}
+#endif
 				break;
 			}
 			else if(i == ATCMD_MAX_REPEAT_NUMS - 1)
@@ -1119,11 +1687,53 @@ u8 bc95_UDP_send(char* ip_addr,char* port,u32 length,u8* data)
 			}
 		}
 	}
+#ifdef USE_COAP
+	for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
+	{
+		bc95_request_CDP_server();
+		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
+		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"+NCDP");
+		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+		bc95_rx_buffer_clean();
+		if(presp!=NULL)
+		{
+			break;
+		}
+	}
+	for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
+	{
+		bc95_NSMI();
+		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
+		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"OK");
+		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+		bc95_rx_buffer_clean();
+		if(presp!=NULL)
+		{
+			break;
+		}
+	}
+	for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
+	{
+		bc95_NNMI();
+		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME);
+		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"OK");
+		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
+		bc95_rx_buffer_clean();
+		if(presp!=NULL)
+		{
+			break;
+		}
+	}
+#endif
 	for (i = 0; i < ATCMD_MAX_REPEAT_NUMS; i++)
 	{
 		seq++;
+#ifndef USE_COAP
 		bc95_UDP_send_messages(socket,ip_addr,port,length,data);
-		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME*10);
+#else
+		bc95_COAP_send_messages(length,data);
+#endif
+		delay_ms(AT_ONE_DIRECTIVE_DELAY_TIME*6);
 		presp = bc95_rec_check((char*)(bc95_rx_buffer_get(&len)),"ERROR");
 		XPRINT(level_printf_char,BC95_PRINTF_LEVEL,"bc95 receive<<",bc95_rx_buffer_get(&len),len);
 		bc95_rec_buffer = strstr((char*)(bc95_rx_buffer_get(&len)),":0,");
@@ -1382,16 +1992,27 @@ void sim800a_task(void *pdata)
 void QR_printf(void)
 {
 	static u8 mac_char[MAC_LEN] = {0}; 
-	USART1_send("OFFSET 0MM\r\n",strlen("OFFSET 0MM\r\n"));
+	USART1_send("OFFSET 3MM\r\n",strlen("OFFSET 3MM\r\n"));
 	USART1_send("SET PEEL OFF\r\n",strlen("SET PEEL OFF\r\n"));
 	USART1_send("SET TEAR ON\r\n",strlen("SET TEAR ON\r\n"));
-	USART1_send("SIZE 40MM,30MM\n",strlen("SIZE 40MM,30MM\n"));
+	USART1_send("SIZE 30MM,20MM\n",strlen("SIZE 30MM,20MM\n"));
 	USART1_send("CLS\r\n",strlen("CLS\r\n"));
 	USART1_send("QRCODE 75,15,L,5,M,2,M1,S2,",strlen("QRCODE 75,15,L,5,M,2,M1,S2,"));
-	hex2char(mac,mac_char,MAC_LEN);
-	USART1_send((char*)mac_char,MAC_LEN);
+	//memcpy(COAP_IMEI)
+	//hex2char(mac,mac_char,MAC_LEN);
+	USART1_send("\"",strlen("\""));
+	USART1_send("R",strlen("R"));
+	USART1_send((char*)COAP_IMEI,15);
+	USART1_send("P",strlen("P"));
+	USART1_send("\"",strlen("\""));
+	USART1_send("\r\n",strlen("\r\n"));
 	USART1_send("TEXT 85,130,\"TSS24.BF2\",0,1,1,",strlen("TEXT 85,130,\"TSS24.BF2\",0,1,1,"));
-	USART1_send((char*)mac_char,MAC_LEN);
+	USART1_send("\"",strlen("\""));
+	USART1_send("R",strlen("R"));
+	USART1_send((char*)mac_char,8);
+	USART1_send("G",strlen("G"));
+	USART1_send("\"",strlen("\""));
+	USART1_send("\r\n",strlen("\r\n"));
 	USART1_send("PRINT 1\r\n",strlen("PRINT 1\r\n"));
 }
 
@@ -1426,7 +2047,6 @@ int gprsCodeGetOut0xla(u8 *pbuf, const u8 *pdata, u16 len)
 			pbuf[j++] = GPRS_TRAN;
 			pbuf[j++] = GPRS_EB;				
 		}
-
 		else
 		{
 			pbuf[j++] = pdata[i];
@@ -1530,4 +2150,44 @@ u32 hex2char(u8* scr_data,u8* obj_data,u32 len)
 }
 
 
+const static u8 REGISTER1[2] = {0xA0,0x00};
+const static u8 REGISTER2[2] = {0xA0,0x01};
+const static u8 REGISTER3[2] = {0xA0,0x02};
+const static u8 REGISTER4[2] = {0xA0,0x03};
+const static u8 REGISTER5[2] = {0xA0,0x04};
+const static u8 REGISTER6[2] = {0xA0,0x05};
+const static u8 REGISTER7[2] = {0xA0,0x06};
+const static u8 REGISTER8[2] = {0xA0,0x07};
+const static u8 REGISTER9[2] = {0xA0,0x08};
+const static u8 TLV_LLEN[2] = {0x00,0x02};
+static u8 change2tvl(u8* src,u8* dst)
+{
+	
+	u8 i;
+	u8 len =0;
+	for(i=0;i<9;i++)
+	{
+		switch(i)
+		{
+			case 0:memcpy(dst+i*6,REGISTER1,2);len+=2;break;
+			case 1:memcpy(dst+i*6,REGISTER2,2);len+=2;break;
+			case 2:memcpy(dst+i*6,REGISTER3,2);len+=2;break;
+			case 3:memcpy(dst+i*6,REGISTER4,2);len+=2;break;
+			case 4:memcpy(dst+i*6,REGISTER5,2);len+=2;break;
+			case 5:memcpy(dst+i*6,REGISTER6,2);len+=2;break;
+			case 6:memcpy(dst+i*6,REGISTER7,2);len+=2;break;
+			case 7:memcpy(dst+i*6,REGISTER8,2);len+=2;break;
+			case 8:memcpy(dst+i*6,REGISTER9,2);len+=2;break;
+			default:break;
+		}
+		memcpy(dst+i*6+2,TLV_LLEN,2);
+		len+=2;
+		memcpy(dst+i*6+4,src+i*2,2);
+		len+=2;
+	}
+//	memcpy(dst,REGISTER1,2);
+//	memcpy(dst+2,TLV_LLEN,2);
+//	memcpy(dst+4,src+2,18);
+	return len;
+}
 
